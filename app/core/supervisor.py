@@ -53,13 +53,15 @@ class SupervisorAgent:
             "Preserve the original structure whenever possible.\n\n"
             f"User request: {user_message}\n"
             f"Selected agent: {agent_result.agent_name}\n"
-            f"Used tool: {agent_result.used_tool or 'None'}\n"
+            f"Used tools: {', '.join(agent_result.used_tools) if agent_result.used_tools else 'None'}\n"
             f"Agent result: {agent_result.content}\n\n"
             "Write the final response for the user."
         )
+
         final_response = self.llm_client.generate(final_prompt)
 
         return SupervisorResponse(
             selected_agent=agent_result.agent_name,
             final_response=final_response,
+            used_tools=agent_result.used_tools,
         )
