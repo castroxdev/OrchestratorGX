@@ -45,13 +45,18 @@ class SupervisorAgent:
         final_prompt = (
             "You are the supervisor agent of a software assistant system.\n"
             "Your job is to produce the final response for the user.\n"
-            "Use the agent result below to write a clear, direct, and helpful final answer.\n\n"
+            "Use the agent result as the main source of truth.\n"
+            "You may lightly reformulate the text for clarity, readability, and flow.\n"
+            "Do not significantly expand the scope.\n"
+            "Do not introduce major new ideas.\n"
+            "Keep the final answer aligned with the agent result.\n"
+            "Preserve the original structure whenever possible.\n\n"
             f"User request: {user_message}\n"
             f"Selected agent: {agent_result.agent_name}\n"
+            f"Used tool: {agent_result.used_tool or 'None'}\n"
             f"Agent result: {agent_result.content}\n\n"
             "Write the final response for the user."
         )
-
         final_response = self.llm_client.generate(final_prompt)
 
         return SupervisorResponse(
