@@ -1,0 +1,16 @@
+from app.core.llm_client import LLMClient
+
+
+def generate_mvp_plan(llm_client: LLMClient, user_message: str) -> str:
+    prompt = (
+        "You are a planning tool inside a software assistant system.\n"
+        "Generate a short MVP plan based on the user's idea.\n"
+        "Keep the answer practical, clear, and structured.\n\n"
+        "Include:\n"
+        "- project goal\n"
+        "- core features\n"
+        "- simple first version scope\n\n"
+        f"User request: {user_message}"
+    )
+
+    return llm_client.generate(prompt)
