@@ -1,5 +1,6 @@
 from app.core.llm_client import LLMClient
 from app.schemas.messages import AgentResult
+from app.tools.planner.define_user_flows import define_user_flows
 
 
 class PlannerAgent:
@@ -9,16 +10,10 @@ class PlannerAgent:
         self.llm_client = llm_client
 
     def handle(self, user_message: str) -> AgentResult:
-        prompt = (
-            "You are the Planner Agent of a software assistant system.\n"
-            "Handle requests related to MVP planning, core features, and user flows.\n"
-            "Reply clearly and directly.\n\n"
-            f"User request: {user_message}"
-        )
-
-        response = self.llm_client.generate(prompt)
+        tool_result = define_user_flows(self.llm_client, user_message)
 
         return AgentResult(
             agent_name=self.name,
-            content=response
+            content=tool_result,
+            used_tool="define_user_flows"
         )
