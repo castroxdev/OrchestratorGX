@@ -1,5 +1,6 @@
 from app.core.llm_client import LLMClient
 from app.schemas.messages import AgentResult
+from app.tools.database.generate_sql_schema import generate_sql_schema
 
 
 class DatabaseAgent:
@@ -9,17 +10,10 @@ class DatabaseAgent:
         self.llm_client = llm_client
 
     def handle(self, user_message: str) -> AgentResult:
-        prompt = (
-            "You are the Database Agent of a software assistant system.\n"
-            "Handle requests related to database design, entities, relationships, "
-            "SQL schemas, and data modeling.\n"
-            "Reply clearly and directly.\n\n"
-            f"User request: {user_message}"
-        )
-
-        response = self.llm_client.generate(prompt)
+        tool_result = generate_sql_schema(self.llm_client, user_message)
 
         return AgentResult(
             agent_name=self.name,
-            content=response
+            content=tool_result,
+            used_tool="generate_sql_schema"
         )
