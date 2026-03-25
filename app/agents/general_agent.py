@@ -21,5 +21,6 @@ class GeneralAgent:
 
         return AgentResult(
             agent_name=self.name,
-            content=response
+            content=response,
+            used_tools=[]
         )

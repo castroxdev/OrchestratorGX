@@ -16,10 +16,19 @@ def main() -> None:
             print("Goodbye.")
             break
 
+        if not user_message:
+            continue
+
         response = supervisor.handle(user_message)
 
         print(f"\nSelected agent: {response.selected_agent}")
-        print(f"{response.final_response}\n")
+
+        if response.used_tools:
+            print(f"Used tools: {', '.join(response.used_tools)}")
+        else:
+            print("Used tools: none")
+
+        print(f"\nAssistant: {response.final_response}\n")
 
 
 if __name__ == "__main__":
