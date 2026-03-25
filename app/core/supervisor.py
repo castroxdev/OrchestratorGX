@@ -22,10 +22,11 @@ class SupervisorAgent:
             "You are a supervisor agent.\n"
             "Choose the best agent for the user's request.\n"
             "Available agents:\n"
-            "- planner: for MVPs, features, and user flows\n"
+            "- planner: for software planning tasks such as MVPs, core features, and user flows\n"
             "- api: for endpoints, requests, responses, and backend design\n"
             "- database: for entities, relationships, and SQL schemas\n"
-            "- general: for general programming questions, explanations, and requests that do not clearly fit the other agents\n\n"
+            "- general: only for broad programming questions, explanations, or requests that do not belong to planning, API design, or database modeling\n\n"
+            "If the request is about product planning, app structure, MVP, features, or user flows, choose planner.\n"
             "Reply with only one word: planner, api, database, or general.\n\n"
             f"User request: {user_message}"
         )
