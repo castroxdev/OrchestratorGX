@@ -16,16 +16,25 @@ class PlannerAgent:
             "define_user_flows": define_user_flows,
         }
 
-    def choose_tool(self, user_message: str) -> str:
+    def choose_tools(self, user_message: str) -> list[str]:
         prompt = (
             "You are the Planner Agent of a software assistant system.\n"
-            "Your task is to choose the best option for the user's request.\n"
+            "Your task is to choose the best planning options for the user's request.\n"
+            "You may choose one tool, multiple tools, or none.\n"
+            "Choose multiple tools when the request clearly includes multiple planning tasks.\n"
+            "For example:\n"
+            "- MVP + core features -> generate_mvp_plan, extract_core_features\n"
+            "- core features + user flows -> extract_core_features, define_user_flows\n"
+            "- MVP + core features + user flows -> generate_mvp_plan, extract_core_features, define_user_flows\n\n"
             "Available options:\n"
-            "- generate_mvp_plan: use this for requests asking for an MVP plan, phased plan, or minimum viable scope\n"
-            "- extract_core_features: use this for requests asking for core features, main features, or essential capabilities\n"
-            "- define_user_flows: use this for requests asking for user journeys, flows, steps, or interaction paths\n"
+            "- generate_mvp_plan: use this for requests asking for an MVP plan, phased plan, first version plan, or minimum viable scope\n"
+            "- extract_core_features: use this for requests asking for core features, main features, essential capabilities, or key functionality\n"
+            "- define_user_flows: use this for requests asking for user journeys, user flows, steps, or interaction paths\n"
             "- none: use this if the request is planning-related but none of the available tools is a strong fit, and the agent should answer directly\n\n"
-            "Reply with only one option name and nothing else.\n"
+            "Reply with:\n"
+            "- one or more option names separated by commas\n"
+            "- or none\n\n"
+            "Reply with only valid option names and nothing else.\n\n"
             "Valid options:\n"
             "generate_mvp_plan\n"
             "extract_core_features\n"
@@ -34,26 +43,31 @@ class PlannerAgent:
             f"User request: {user_message}"
         )
 
-        selected_tool = self.llm_client.generate(prompt).strip().lower()
+        raw_selection = self.llm_client.generate(prompt).strip().lower()
 
-        valid_options = {
+        if raw_selection == "none":
+            return []
+
+        valid_tools = {
             "generate_mvp_plan",
             "extract_core_features",
             "define_user_flows",
-            "none",
         }
 
-        if selected_tool not in valid_options:
-            return "none"
+        selected_tools: list[str] = []
+        for item in raw_selection.split(","):
+            tool_name = item.strip()
+            if tool_name in valid_tools and tool_name not in selected_tools:
+                selected_tools.append(tool_name)
 
-        return selected_tool
+        return selected_tools
 
     def respond_directly(self, user_message: str) -> str:
         prompt = (
             "You are the Planner Agent of a software assistant system.\n"
             "Answer the user's request directly without using any tool.\n"
             "You specialize in product planning tasks such as MVP scope, feature prioritization, "
-            "user flows, roadmap thinking, and product structure.\n"
+            "user flows, roadmap thinking, first version definition, and product structure.\n"
             "Be clear, practical, and well organized.\n"
             "Do not mention internal tools, routing, or system behavior.\n\n"
             f"User request: {user_message}"
@@ -61,10 +75,19 @@ class PlannerAgent:
 
         return self.llm_client.generate(prompt)
 
-    def handle(self, user_message: str) -> AgentResult:
-        selected_tool = self.choose_tool(user_message)
+    def combine_tool_results(self, results: list[tuple[str, str]]) -> str:
+        sections: list[str] = []
 
-        if selected_tool == "none":
+        for tool_name, content in results:
+            title = tool_name.replace("_", " ").title()
+            sections.append(f"{title}:\n{content}")
+
+        return "\n\n".join(sections)
+
+    def handle(self, user_message: str) -> AgentResult:
+        selected_tools = self.choose_tools(user_message)
+
+        if not selected_tools:
             response = self.respond_directly(user_message)
 
             return AgentResult(
@@ -73,11 +96,17 @@ class PlannerAgent:
                 used_tools=[]
             )
 
-        tool_function = self.tools[selected_tool]
-        tool_result = tool_function(self.llm_client, user_message)
+        tool_results: list[tuple[str, str]] = []
+
+        for tool_name in selected_tools:
+            tool_function = self.tools[tool_name]
+            tool_output = tool_function(self.llm_client, user_message)
+            tool_results.append((tool_name, tool_output))
+
+        combined_result = self.combine_tool_results(tool_results)
 
         return AgentResult(
             agent_name=self.name,
-            content=tool_result,
-            used_tools=[selected_tool]
+            content=combined_result,
+            used_tools=selected_tools
         )
