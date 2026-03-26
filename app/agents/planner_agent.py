@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from typing import Optional
+
 from app.core.llm_client import LLMClient
 from app.schemas.messages import AgentResult
 from app.tools.planner.define_user_flows import define_user_flows
@@ -6,6 +9,8 @@ from app.tools.planner.generate_mvp_plan import generate_mvp_plan
 
 
 class PlannerAgent:
+    # PlannerAgent handles product planning requests and decides whether the
+    # answer should come from one or more planning tools or from the LLM alone.
     name = "planner"
 
     def __init__(self, llm_client: LLMClient) -> None:
@@ -48,11 +53,7 @@ class PlannerAgent:
         if raw_selection == "none":
             return []
 
-        valid_tools = {
-            "generate_mvp_plan",
-            "extract_core_features",
-            "define_user_flows",
-        }
+        valid_tools = set(self.tools)
 
         selected_tools: list[str] = []
         for item in raw_selection.split(","):
@@ -84,7 +85,11 @@ class PlannerAgent:
 
         return "\n\n".join(sections)
 
-    def handle(self, user_message: str) -> AgentResult:
+    def handle(
+        self,
+        user_message: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> AgentResult:
         selected_tools = self.choose_tools(user_message)
 
         if not selected_tools:
@@ -97,8 +102,15 @@ class PlannerAgent:
             )
 
         tool_results: list[tuple[str, str]] = []
+        if progress_callback:
+            progress_callback(f"Selected tools: {', '.join(selected_tools)}")
 
+        # Tool chaining here is intentionally simple: the agent picks the tools,
+        # executes them in order, and merges their outputs into one AgentResult.
         for tool_name in selected_tools:
+            if progress_callback:
+                progress_callback(f"Running tool: {tool_name}")
+
             tool_function = self.tools[tool_name]
             tool_output = tool_function(self.llm_client, user_message)
             tool_results.append((tool_name, tool_output))

@@ -1,4 +1,5 @@
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from typing import Optional
 
 from app.agents.api_agent import APIAgent
 from app.agents.database_agent import DatabaseAgent
@@ -9,8 +10,11 @@ from app.schemas.messages import SupervisorResponse
 
 
 class SupervisorAgent:
+    # The supervisor is the orchestration layer: it decides which specialized
+    # agent should handle the request and then turns that agent output into the
+    # final user-facing response.
     def __init__(self, llm_client: LLMClient) -> None:
-        self.llm_client: LLMClient = llm_client
+        self.llm_client = llm_client
 
         self.agents = {
             "planner": PlannerAgent(llm_client),
@@ -40,10 +44,20 @@ class SupervisorAgent:
 
         return selected_agent
 
-    def handle(self, user_message: str) -> SupervisorResponse:
+    def handle(
+        self,
+        user_message: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> SupervisorResponse:
+        # The supervisor never calls tools directly. It delegates the request to
+        # one agent, receives an AgentResult back, and packages the final answer
+        # as a SupervisorResponse for the outer layer.
         selected_agent = self.choose_agent(user_message)
+        if progress_callback:
+            progress_callback(f"Selected agent: {selected_agent}")
+
         agent = self.agents.get(selected_agent, self.agents["general"])
-        agent_result = agent.handle(user_message)
+        agent_result = agent.handle(user_message, progress_callback=progress_callback)
 
         final_prompt = (
             "You are the supervisor agent of a software assistant system.\n"
@@ -60,6 +74,9 @@ class SupervisorAgent:
             f"Agent result: {agent_result.content}\n\n"
             "Write the final response for the user."
         )
+
+        if progress_callback:
+            progress_callback("Generating final response...")
 
         final_response = self.llm_client.generate(final_prompt)
 
@@ -69,10 +86,19 @@ class SupervisorAgent:
             used_tools=agent_result.used_tools,
         )
 
-    def handle_stream(self, user_message: str) -> Iterator[dict]:
+    def handle_stream(
+        self,
+        user_message: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> Iterator[dict]:
+        # Streaming keeps the same orchestration flow. The only difference is
+        # that the final supervisor answer is yielded in chunks for the web UI.
         selected_agent = self.choose_agent(user_message)
+        if progress_callback:
+            progress_callback(f"Selected agent: {selected_agent}")
+
         agent = self.agents.get(selected_agent, self.agents["general"])
-        agent_result = agent.handle(user_message)
+        agent_result = agent.handle(user_message, progress_callback=progress_callback)
 
         final_prompt = (
             "You are the supervisor agent of a software assistant system.\n"
@@ -89,6 +115,9 @@ class SupervisorAgent:
             f"Agent result: {agent_result.content}\n\n"
             "Write the final response for the user."
         )
+
+        if progress_callback:
+            progress_callback("Generating final response...")
 
         yield {
             "type": "metadata",

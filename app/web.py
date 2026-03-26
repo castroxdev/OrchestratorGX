@@ -17,6 +17,10 @@ DEFAULT_MODEL = "qwen2.5-coder:3b"
 
 
 class WebChatHandler(BaseHTTPRequestHandler):
+    # This handler is the web entry point of the project.
+    # It does not contain the assistant logic itself: it only receives HTTP
+    # requests, forwards user messages to the supervisor, and returns the
+    # supervisor output to the browser.
     supervisor: SupervisorAgent
     static_routes = {
         "/": ("index.html", "text/html; charset=utf-8"),
@@ -31,6 +35,8 @@ class WebChatHandler(BaseHTTPRequestHandler):
             self._send_json(HTTPStatus.OK, {"status": "ok"})
             return
 
+        # The UI files are served directly from here so the browser can load
+        # the chat page, CSS, and JavaScript.
         static_route = self.static_routes.get(path)
         if not static_route:
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
@@ -50,6 +56,8 @@ class WebChatHandler(BaseHTTPRequestHandler):
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             return
 
+        # This is where a normal chat message first enters through the web API.
+        # The browser sends JSON like {"message": "..."} to this route.
         try:
             payload = self._read_json_body()
         except json.JSONDecodeError:
@@ -62,6 +70,9 @@ class WebChatHandler(BaseHTTPRequestHandler):
             return
 
         try:
+            # The user message is forwarded to the same SupervisorAgent used by
+            # the rest of the project. The web layer does not decide agents or
+            # tools on its own.
             response = self.supervisor.handle(message)
         except Exception as error:
             self._send_json(
@@ -73,9 +84,14 @@ class WebChatHandler(BaseHTTPRequestHandler):
             )
             return
 
+        # This is where the web layer receives the final SupervisorResponse and
+        # converts it to JSON for the frontend.
         self._send_json(HTTPStatus.OK, response.model_dump())
 
     def _handle_chat_stream(self) -> None:
+        # This route receives the user message the same way as /api/chat, but it
+        # returns the final answer as a stream of small events instead of one
+        # complete JSON response.
         try:
             payload = self._read_json_body()
         except json.JSONDecodeError:
@@ -94,7 +110,20 @@ class WebChatHandler(BaseHTTPRequestHandler):
         self.end_headers()
 
         try:
-            for event in self.supervisor.handle_stream(message):
+            def write_progress(progress_message: str) -> None:
+                # Progress events are small messages for the UI, such as
+                # "Selected agent: planner" or "Running tool: ...".
+                self._write_stream_event(
+                    {
+                        "type": "progress",
+                        "message": progress_message,
+                    }
+                )
+
+            # The streaming path still uses the supervisor as the source of
+            # truth. The difference is that the supervisor now yields progress
+            # events and final response chunks over time.
+            for event in self.supervisor.handle_stream(message, progress_callback=write_progress):
                 self._write_stream_event(event)
         except Exception as error:
             self._write_stream_event(
@@ -109,6 +138,7 @@ class WebChatHandler(BaseHTTPRequestHandler):
         return
 
     def _read_json_body(self) -> dict:
+        # Reads the raw HTTP request body and parses it into a Python dict.
         content_length = int(self.headers.get("Content-Length", "0"))
         raw_body = self.rfile.read(content_length).decode("utf-8")
         if not raw_body:
@@ -130,6 +160,7 @@ class WebChatHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def _send_json(self, status: HTTPStatus, payload: dict) -> None:
+        # Sends a normal JSON response back to the browser.
         content = json.dumps(payload).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -138,17 +169,22 @@ class WebChatHandler(BaseHTTPRequestHandler):
         self.wfile.write(content)
 
     def _write_stream_event(self, payload: dict) -> None:
+        # Sends one NDJSON event line to the frontend stream reader.
         content = f"{json.dumps(payload)}\n".encode("utf-8")
         self.wfile.write(content)
         self.wfile.flush()
 
 
 def build_server(host: str, port: int, model: str) -> ThreadingHTTPServer:
+    # The web server creates a single SupervisorAgent instance and shares it
+    # with request handlers, so both the CLI and web UI keep the same core flow.
     WebChatHandler.supervisor = SupervisorAgent(LLMClient(model=model))
     return ThreadingHTTPServer((host, port), WebChatHandler)
 
 
 def main() -> None:
+    # This is the web equivalent of app/main.py: it creates the server and
+    # starts listening for browser requests instead of terminal input.
     parser = argparse.ArgumentParser(description="Run the OrchestratorGX web UI.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Host to bind the server to.")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="Port to bind the server to.")

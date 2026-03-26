@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from typing import Optional
+
 from app.core.llm_client import LLMClient
 from app.schemas.messages import AgentResult
 from app.tools.database.generate_sql_schema import generate_sql_schema
@@ -6,6 +9,8 @@ from app.tools.database.suggest_entities import suggest_entities
 
 
 class DatabaseAgent:
+    # DatabaseAgent is responsible for data modeling requests and can chain
+    # entity, relationship, and schema tools when the request needs them.
     name = "database"
 
     def __init__(self, llm_client: LLMClient) -> None:
@@ -47,11 +52,7 @@ class DatabaseAgent:
         if raw_selection == "none":
             return []
 
-        valid_tools = {
-            "generate_sql_schema",
-            "suggest_entities",
-            "map_relationships",
-        }
+        valid_tools = set(self.tools)
 
         selected_tools: list[str] = []
         for item in raw_selection.split(","):
@@ -83,7 +84,11 @@ class DatabaseAgent:
 
         return "\n\n".join(sections)
 
-    def handle(self, user_message: str) -> AgentResult:
+    def handle(
+        self,
+        user_message: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> AgentResult:
         selected_tools = self.choose_tools(user_message)
 
         if not selected_tools:
@@ -96,8 +101,15 @@ class DatabaseAgent:
             )
 
         tool_results: list[tuple[str, str]] = []
+        if progress_callback:
+            progress_callback(f"Selected tools: {', '.join(selected_tools)}")
 
+        # Tools are executed sequentially and the combined text becomes the
+        # agent output that goes back to the supervisor.
         for tool_name in selected_tools:
+            if progress_callback:
+                progress_callback(f"Running tool: {tool_name}")
+
             tool_function = self.tools[tool_name]
             tool_output = tool_function(self.llm_client, user_message)
             tool_results.append((tool_name, tool_output))
