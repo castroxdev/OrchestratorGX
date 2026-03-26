@@ -1,3 +1,5 @@
+from collections.abc import Iterator
+
 from app.agents.api_agent import APIAgent
 from app.agents.database_agent import DatabaseAgent
 from app.agents.general_agent import GeneralAgent
@@ -66,3 +68,46 @@ class SupervisorAgent:
             final_response=final_response,
             used_tools=agent_result.used_tools,
         )
+
+    def handle_stream(self, user_message: str) -> Iterator[dict]:
+        selected_agent = self.choose_agent(user_message)
+        agent = self.agents.get(selected_agent, self.agents["general"])
+        agent_result = agent.handle(user_message)
+
+        final_prompt = (
+            "You are the supervisor agent of a software assistant system.\n"
+            "Your job is to produce the final response for the user.\n"
+            "Use the agent result as the main source of truth.\n"
+            "You may lightly reformulate the text for clarity, readability, and flow.\n"
+            "Do not significantly expand the scope.\n"
+            "Do not introduce major new ideas.\n"
+            "Keep the final answer aligned with the agent result.\n"
+            "Preserve the original structure whenever possible.\n\n"
+            f"User request: {user_message}\n"
+            f"Selected agent: {agent_result.agent_name}\n"
+            f"Used tools: {', '.join(agent_result.used_tools) if agent_result.used_tools else 'None'}\n"
+            f"Agent result: {agent_result.content}\n\n"
+            "Write the final response for the user."
+        )
+
+        yield {
+            "type": "metadata",
+            "selected_agent": agent_result.agent_name,
+            "used_tools": agent_result.used_tools,
+        }
+
+        final_response_parts: list[str] = []
+
+        for chunk in self.llm_client.stream_generate(final_prompt):
+            final_response_parts.append(chunk)
+            yield {
+                "type": "chunk",
+                "content": chunk,
+            }
+
+        yield {
+            "type": "done",
+            "selected_agent": agent_result.agent_name,
+            "used_tools": agent_result.used_tools,
+            "final_response": "".join(final_response_parts),
+        }

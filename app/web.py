@@ -42,6 +42,10 @@ class WebChatHandler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         path = urlparse(self.path).path
 
+        if path == "/api/chat/stream":
+            self._handle_chat_stream()
+            return
+
         if path != "/api/chat":
             self.send_error(HTTPStatus.NOT_FOUND, "Not found")
             return
@@ -70,6 +74,36 @@ class WebChatHandler(BaseHTTPRequestHandler):
             return
 
         self._send_json(HTTPStatus.OK, response.model_dump())
+
+    def _handle_chat_stream(self) -> None:
+        try:
+            payload = self._read_json_body()
+        except json.JSONDecodeError:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Invalid JSON body."})
+            return
+
+        message = str(payload.get("message", "")).strip()
+        if not message:
+            self._send_json(HTTPStatus.BAD_REQUEST, {"error": "Message is required."})
+            return
+
+        self.send_response(HTTPStatus.OK)
+        self.send_header("Content-Type", "application/x-ndjson; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.end_headers()
+
+        try:
+            for event in self.supervisor.handle_stream(message):
+                self._write_stream_event(event)
+        except Exception as error:
+            self._write_stream_event(
+                {
+                    "type": "error",
+                    "error": "Failed to process the message.",
+                    "details": str(error),
+                }
+            )
 
     def log_message(self, format: str, *args) -> None:
         return
@@ -102,6 +136,11 @@ class WebChatHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(content)))
         self.end_headers()
         self.wfile.write(content)
+
+    def _write_stream_event(self, payload: dict) -> None:
+        content = f"{json.dumps(payload)}\n".encode("utf-8")
+        self.wfile.write(content)
+        self.wfile.flush()
 
 
 def build_server(host: str, port: int, model: str) -> ThreadingHTTPServer:

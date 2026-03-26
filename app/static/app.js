@@ -24,7 +24,7 @@ form.addEventListener("submit", async (event) => {
   const loadingMessage = appendMessage("assistant", "Thinking...", true);
 
   try {
-    const response = await fetch("/api/chat", {
+    const response = await fetch("/api/chat/stream", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -32,13 +32,16 @@ form.addEventListener("submit", async (event) => {
       body: JSON.stringify({ message }),
     });
 
-    const payload = await response.json().catch(() => ({}));
     if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
       throw new Error(payload.error || "Request failed.");
     }
 
-    loadingMessage.remove();
-    appendAssistantResponse(payload);
+    if (!response.body) {
+      throw new Error("Streaming is not available in this browser.");
+    }
+
+    await consumeStreamResponse(response.body, loadingMessage);
   } catch (error) {
     loadingMessage.remove();
     showError(error.message || "Unexpected request error.");
@@ -56,12 +59,79 @@ input.addEventListener("keydown", (event) => {
 });
 
 function appendAssistantResponse(payload) {
-  const responseText =
-    typeof payload.final_response === "string" && payload.final_response.trim()
-      ? payload.final_response
-      : "The backend returned no final_response.";
+  const wrapper = appendMessage("assistant", "");
+  updateMessageContent(wrapper, payload.final_response || "The backend returned no final_response.");
+  renderAssistantMetadata(wrapper, payload);
+}
 
-  const wrapper = appendMessage("assistant", responseText);
+async function consumeStreamResponse(body, messageElement) {
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let fullResponse = "";
+  let finalPayload = {};
+
+  while (true) {
+    const { value, done } = await reader.read();
+    buffer += decoder.decode(value || new Uint8Array(), { stream: !done });
+
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (!line.trim()) {
+        continue;
+      }
+
+      const event = JSON.parse(line);
+
+      if (event.type === "metadata") {
+        finalPayload = {
+          ...finalPayload,
+          selected_agent: event.selected_agent,
+          used_tools: event.used_tools,
+        };
+        continue;
+      }
+
+      if (event.type === "chunk") {
+        fullResponse += event.content || "";
+        updateMessageContent(messageElement, fullResponse || "Thinking...");
+        continue;
+      }
+
+      if (event.type === "done") {
+        finalPayload = { ...finalPayload, ...event };
+        if (event.final_response) {
+          fullResponse = event.final_response;
+        }
+        continue;
+      }
+
+      if (event.type === "error") {
+        throw new Error(event.error || "Streaming failed.");
+      }
+    }
+
+    if (done) {
+      break;
+    }
+  }
+
+  messageElement.classList.remove("loading");
+  updateMessageContent(
+    messageElement,
+    fullResponse || finalPayload.final_response || "The backend returned no final_response."
+  );
+  renderAssistantMetadata(messageElement, finalPayload);
+}
+
+function renderAssistantMetadata(wrapper, payload) {
+  const existingMetadata = wrapper.querySelector(".message-meta");
+  if (existingMetadata) {
+    existingMetadata.remove();
+  }
+
   const metadata = document.createElement("div");
   metadata.className = "message-meta";
 
@@ -85,7 +155,7 @@ function appendAssistantResponse(payload) {
 
   const extraMetadata = {};
   Object.entries(payload).forEach(([key, value]) => {
-    if (["final_response", "used_tools", "selected_agent"].includes(key)) {
+    if (["type", "final_response", "used_tools", "selected_agent"].includes(key)) {
       return;
     }
 
@@ -130,6 +200,12 @@ function appendMessage(role, text, isPending = false) {
   messages.scrollTop = messages.scrollHeight;
 
   return article;
+}
+
+function updateMessageContent(messageElement, text) {
+  const content = messageElement.querySelector(".message-content");
+  content.textContent = text;
+  messages.scrollTop = messages.scrollHeight;
 }
 
 function createChip(label) {
