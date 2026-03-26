@@ -3,6 +3,8 @@ from app.core.supervisor import SupervisorAgent
 
 
 def main() -> None:
+    # The CLI is just a thin entry point: it sends the user message to the
+    # supervisor and prints the structured response that comes back.
     llm_client = LLMClient(model="qwen2.5-coder:3b")
     supervisor = SupervisorAgent(llm_client)
 
@@ -19,6 +21,8 @@ def main() -> None:
         if not user_message:
             continue
 
+        # From here the flow is:
+        # user -> supervisor -> selected agent -> tools (optional) -> supervisor -> user
         response = supervisor.handle(user_message)
 
         print(f"\nSelected agent: {response.selected_agent}")
