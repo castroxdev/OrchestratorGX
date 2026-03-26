@@ -1,3 +1,6 @@
+from collections.abc import Callable
+from typing import Optional
+
 from app.core.llm_client import LLMClient
 from app.schemas.messages import AgentResult
 from app.tools.api.generate_api_endpoints import generate_api_endpoints
@@ -5,6 +8,8 @@ from app.tools.api.suggest_request_response_models import suggest_request_respon
 
 
 class APIAgent:
+    # APIAgent focuses on backend contract design such as endpoints and
+    # request/response models, optionally combining multiple API tools.
     name = "api"
 
     def __init__(self, llm_client: LLMClient) -> None:
@@ -47,10 +52,7 @@ class APIAgent:
         if raw_selection == "none":
             return []
 
-        valid_tools = {
-            "generate_api_endpoints",
-            "suggest_request_response_models",
-        }
+        valid_tools = set(self.tools)
 
         selected_tools: list[str] = []
         for item in raw_selection.split(","):
@@ -82,7 +84,11 @@ class APIAgent:
 
         return "\n\n".join(sections)
 
-    def handle(self, user_message: str) -> AgentResult:
+    def handle(
+        self,
+        user_message: str,
+        progress_callback: Optional[Callable[[str], None]] = None,
+    ) -> AgentResult:
         selected_tools = self.choose_tools(user_message)
 
         if not selected_tools:
@@ -95,8 +101,15 @@ class APIAgent:
             )
 
         tool_results: list[tuple[str, str]] = []
+        if progress_callback:
+            progress_callback(f"Selected tools: {', '.join(selected_tools)}")
 
+        # Each selected tool contributes one piece of the answer, and the agent
+        # returns both the merged content and the list of tools it actually used.
         for tool_name in selected_tools:
+            if progress_callback:
+                progress_callback(f"Running tool: {tool_name}")
+
             tool_function = self.tools[tool_name]
             tool_output = tool_function(self.llm_client, user_message)
             tool_results.append((tool_name, tool_output))
