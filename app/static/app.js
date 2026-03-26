@@ -58,12 +58,6 @@ input.addEventListener("keydown", (event) => {
   }
 });
 
-function appendAssistantResponse(payload) {
-  const wrapper = appendMessage("assistant", "");
-  updateMessageContent(wrapper, payload.final_response || "The backend returned no final_response.");
-  renderAssistantMetadata(wrapper, payload);
-}
-
 async function consumeStreamResponse(body, messageElement) {
   const reader = body.getReader();
   const decoder = new TextDecoder();
@@ -91,6 +85,11 @@ async function consumeStreamResponse(body, messageElement) {
           selected_agent: event.selected_agent,
           used_tools: event.used_tools,
         };
+        continue;
+      }
+
+      if (event.type === "progress") {
+        appendProgressEvent(messageElement, event.message);
         continue;
       }
 
@@ -123,6 +122,7 @@ async function consumeStreamResponse(body, messageElement) {
     messageElement,
     fullResponse || finalPayload.final_response || "The backend returned no final_response."
   );
+  finalizeProgressPath(messageElement);
   renderAssistantMetadata(messageElement, finalPayload);
 }
 
@@ -206,6 +206,62 @@ function updateMessageContent(messageElement, text) {
   const content = messageElement.querySelector(".message-content");
   content.textContent = text;
   messages.scrollTop = messages.scrollHeight;
+}
+
+function appendProgressEvent(messageElement, text) {
+  const progressList = ensureProgressList(messageElement);
+  const item = document.createElement("li");
+  item.className = "progress-item";
+  item.textContent = text;
+  progressList.appendChild(item);
+  updateProgressSummary(messageElement);
+  messages.scrollTop = messages.scrollHeight;
+}
+
+function ensureProgressList(messageElement) {
+  let progressDetails = messageElement.querySelector(".progress-path");
+  if (progressDetails) {
+    progressDetails.open = true;
+    return progressDetails.querySelector(".progress-list");
+  }
+
+  progressDetails = document.createElement("details");
+  progressDetails.className = "progress-path";
+  progressDetails.open = true;
+
+  const summary = document.createElement("summary");
+  summary.className = "progress-title";
+  summary.textContent = "Thinking path";
+
+  const list = document.createElement("ul");
+  list.className = "progress-list";
+
+  progressDetails.appendChild(summary);
+  progressDetails.appendChild(list);
+  messageElement.appendChild(progressDetails);
+
+  return list;
+}
+
+function updateProgressSummary(messageElement) {
+  const progressDetails = messageElement.querySelector(".progress-path");
+  if (!progressDetails) {
+    return;
+  }
+
+  const steps = progressDetails.querySelectorAll(".progress-item").length;
+  const summary = progressDetails.querySelector(".progress-title");
+  summary.textContent = steps > 0 ? `Thinking path (${steps})` : "Thinking path";
+}
+
+function finalizeProgressPath(messageElement) {
+  const progressDetails = messageElement.querySelector(".progress-path");
+  if (!progressDetails) {
+    return;
+  }
+
+  updateProgressSummary(messageElement);
+  progressDetails.open = false;
 }
 
 function createChip(label) {
