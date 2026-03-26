@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OrchestratorGX Chat</title>
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <main class="chat-shell">
+      <header class="chat-header">
+        <div>
+          <p class="eyebrow">OrchestratorGX</p>
+          <h1>Minimal web chat</h1>
+        </div>
+        <p class="subtitle">A thin UI layer on top of the current supervisor flow.</p>
+      </header>
+
+      <section id="messages" class="messages" aria-live="polite">
+        <div class="empty-state" id="empty-state">
+          Send a message to start the conversation.
+        </div>
+      </section>
+
+      <div id="error-banner" class="error-banner" hidden></div>
+
+      <form id="chat-form" class="composer">
+        <label class="sr-only" for="message-input">Your message</label>
+        <textarea
+          id="message-input"
+          name="message"
+          rows="3"
+          placeholder="Type your message here..."
+          required
+        ></textarea>
+
+        <div class="composer-actions">
+          <span id="status-text" class="status-text">Ready</span>
+          <button id="send-button" type="submit">Send</button>
+        </div>
+      </form>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

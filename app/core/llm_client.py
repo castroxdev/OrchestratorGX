@@ -14,3 +14,17 @@ class LLMClient:
         )
 
         return response["message"]["content"].strip()
+
+    def stream_generate(self, prompt: str):
+        stream = ollama.chat(
+            model=self.model,
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            stream=True,
+        )
+
+        for chunk in stream:
+            content = chunk.get("message", {}).get("content", "")
+            if content:
+                yield content
