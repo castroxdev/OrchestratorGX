@@ -8,6 +8,7 @@ from app.agents.planner_agent import PlannerAgent
 from app.core.llm_client import LLMClient
 from app.schemas.messages import SupervisorResponse
 from app.schemas.distilled_task import DistilledTask
+from app.schemas.supervisor_context import SupervisorContext
 
 
 class SupervisorAgent:
@@ -19,6 +20,10 @@ class SupervisorAgent:
 
     def __init__(self, llm_client: LLMClient) -> None:
         self.llm_client = llm_client
+        self.recent_messages: list[str] = []
+        self.last_selected_agent: str | None = None
+        self.last_intent: str | None = None
+        self.last_distilled_task: str | None = None
 
         self.agents = {
             "planner": PlannerAgent(llm_client),
@@ -27,7 +32,16 @@ class SupervisorAgent:
             "general": GeneralAgent(llm_client),
         }
 
-    def choose_agent(self, user_message: str) -> str:
+    def build_supervisor_context(self, user_message: str) -> SupervisorContext:
+        return SupervisorContext(
+            user_message=user_message,
+            recent_messages=self.recent_messages[-5:],
+            last_selected_agent=self.last_selected_agent,
+            last_intent=self.last_intent,
+            last_distilled_task=self.last_distilled_task,
+        )
+
+    def choose_agent(self, context: SupervisorContext) -> str:
         prompt = (
             "You are a supervisor agent.\n"
             "Choose the best agent for the user's request.\n"
@@ -36,9 +50,14 @@ class SupervisorAgent:
             "- api: for endpoints, requests, responses, DTOs, payloads, and backend/API design\n"
             "- database: for entities, relationships, table design, SQL schemas, and data modeling\n"
             "- general: for general programming questions, explanations, and requests that do not clearly fit the other agents\n\n"
-            "Prefer planner for product planning requests, especially when the user asks about MVPs, first versions, core features, or user flows.\n"
+            "Prefer planner for product planning requests, especially when the user asks about MVPs, first versions, core features, or user flows.\n\n"
+            "Use the available conversation context when relevant.\n"
+            f"Recent messages: {context.recent_messages if context.recent_messages else 'None'}\n"
+            f"Last selected agent: {context.last_selected_agent if context.last_selected_agent else 'None'}\n"
+            f"Last intent: {context.last_intent if context.last_intent else 'None'}\n"
+            f"Last distilled task: {context.last_distilled_task if context.last_distilled_task else 'None'}\n\n"
             "Reply with only one word: planner, api, database, or general.\n\n"
-            f"User request: {user_message}"
+            f"User request: {context.user_message}"
         )
 
         selected_agent = self.llm_client.generate(prompt).lower().strip()
@@ -48,25 +67,30 @@ class SupervisorAgent:
 
         return selected_agent
 
-    def build_distilled_task(self, user_message: str, selected_agent: str) -> DistilledTask:
+    def build_distilled_task(self, context: SupervisorContext, selected_agent: str) -> DistilledTask:
         prompt = (
             "You are a supervisor agent preparing a task for a specialized worker agent.\n"
             "Your job is to rewrite the user's request into a shorter, clearer, more focused task for the selected agent.\n"
             "Keep only information that is useful for solving the request.\n"
             "Preserve important constraints, preferences, scope, and key technical details.\n"
             "Remove conversational filler, repetition, and irrelevant background.\n\n"
+            "Use the available conversation context when relevant.\n"
+            f"Recent messages: {context.recent_messages if context.recent_messages else 'None'}\n"
+            f"Last selected agent: {context.last_selected_agent if context.last_selected_agent else 'None'}\n"
+            f"Last intent: {context.last_intent if context.last_intent else 'None'}\n"
+            f"Last distilled task: {context.last_distilled_task if context.last_distilled_task else 'None'}\n\n"
             "Also infer a short intent label when possible.\n\n"
             "Return your answer in exactly this format:\n"
             "DISTILLED_PROMPT: <short focused task>\n"
             "INTENT: <short intent label or none>\n"
             "CONSTRAINTS: <comma-separated constraints or none>\n\n"
             f"Selected agent: {selected_agent}\n"
-            f"User request: {user_message}"
+            f"User request: {context.user_message}"
         )
 
         raw_output = self.llm_client.generate(prompt).strip()
 
-        distilled_prompt = user_message.strip()
+        distilled_prompt = context.user_message.strip()
         intent = None
         constraints: list[str] = []
 
@@ -91,10 +115,10 @@ class SupervisorAgent:
                     ]
 
         if not distilled_prompt:
-            distilled_prompt = user_message.strip()
+            distilled_prompt = context.user_message.strip()
 
         return DistilledTask(
-            original_message=user_message,
+            original_message=context.user_message,
             distilled_prompt=distilled_prompt,
             selected_agent=selected_agent,
             intent=intent,
@@ -106,11 +130,13 @@ class SupervisorAgent:
         user_message: str,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> SupervisorResponse:
-        selected_agent = self.choose_agent(user_message)
+        context = self.build_supervisor_context(user_message)
+
+        selected_agent = self.choose_agent(context)
         if progress_callback:
             progress_callback(f"Selected agent: {selected_agent}")
 
-        distilled_task = self.build_distilled_task(user_message, selected_agent)
+        distilled_task = self.build_distilled_task(context, selected_agent)
         if progress_callback:
             progress_callback(f"Distilled task: {distilled_task.distilled_prompt}")
         if progress_callback and distilled_task.intent:
@@ -129,7 +155,7 @@ class SupervisorAgent:
             "Keep the final answer aligned with the agent result.\n"
             "Preserve the original structure whenever possible.\n\n"
             f"{self.final_response_language_instruction}\n"
-            f"User request: {user_message}\n"
+            f"User request: {context.user_message}\n"
             f"Distilled task: {distilled_task.distilled_prompt}\n"
             f"Intent: {distilled_task.intent if distilled_task.intent else 'None'}\n"
             f"Constraints: {', '.join(distilled_task.constraints) if distilled_task.constraints else 'None'}\n"
@@ -144,6 +170,11 @@ class SupervisorAgent:
 
         final_response = self.llm_client.generate(final_prompt)
 
+        self.recent_messages.append(user_message)
+        self.last_selected_agent = selected_agent
+        self.last_intent = distilled_task.intent
+        self.last_distilled_task = distilled_task.distilled_prompt
+
         return SupervisorResponse(
             selected_agent=agent_result.agent_name,
             final_response=final_response,
@@ -155,11 +186,13 @@ class SupervisorAgent:
         user_message: str,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> Iterator[dict]:
-        selected_agent = self.choose_agent(user_message)
+        context = self.build_supervisor_context(user_message)
+
+        selected_agent = self.choose_agent(context)
         if progress_callback:
             progress_callback(f"Selected agent: {selected_agent}")
 
-        distilled_task = self.build_distilled_task(user_message, selected_agent)
+        distilled_task = self.build_distilled_task(context, selected_agent)
         if progress_callback:
             progress_callback(f"Distilled task: {distilled_task.distilled_prompt}")
         if progress_callback and distilled_task.intent:
@@ -178,7 +211,7 @@ class SupervisorAgent:
             "Keep the final answer aligned with the agent result.\n"
             "Preserve the original structure whenever possible.\n\n"
             f"{self.final_response_language_instruction}\n"
-            f"User request: {user_message}\n"
+            f"User request: {context.user_message}\n"
             f"Distilled task: {distilled_task.distilled_prompt}\n"
             f"Intent: {distilled_task.intent if distilled_task.intent else 'None'}\n"
             f"Constraints: {', '.join(distilled_task.constraints) if distilled_task.constraints else 'None'}\n"
@@ -205,6 +238,11 @@ class SupervisorAgent:
                 "type": "chunk",
                 "content": chunk,
             }
+
+        self.recent_messages.append(user_message)
+        self.last_selected_agent = selected_agent
+        self.last_intent = distilled_task.intent
+        self.last_distilled_task = distilled_task.distilled_prompt
 
         yield {
             "type": "done",
