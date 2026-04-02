@@ -10,8 +10,8 @@ from app.tools.database.suggest_entities import suggest_entities
 
 
 class DatabaseAgent:
-    # DatabaseAgent is responsible for data modeling requests and can chain
-    # entity, relationship, and schema tools when the request needs them.
+    # Especializado em modelação de dados, podendo encadear tools de entidades,
+    # relações e schema conforme o pedido.
     name = "database"
     response_language_instruction = (
         "Respond in Portuguese.\n"
@@ -28,6 +28,7 @@ class DatabaseAgent:
         }
 
     def choose_tools(self, task: DistilledTask) -> list[str]:
+        # O output do LLM é validado localmente antes da execução das tools.
         prompt = (
             "You are the Database Agent of a software assistant system.\n"
             "Your task is to choose the best database options for the user's request.\n"
@@ -69,6 +70,8 @@ class DatabaseAgent:
         return selected_tools
 
     def respond_directly(self, task: DistilledTask) -> str:
+        # Mantém resposta útil mesmo quando o pedido é de base de dados mas
+        # não encaixa de forma clara nas tools existentes.
         prompt = (
             "You are the Database Agent of a software assistant system.\n"
             "Answer the user's request directly without using any tool.\n"
@@ -83,6 +86,8 @@ class DatabaseAgent:
         return self.llm_client.generate(prompt)
 
     def build_tool_user_request(self, task: DistilledTask) -> str:
+        # Uniformiza as instruções de idioma e preservação de identificadores
+        # técnicos antes de delegar para as tools.
         return (
             f"{task.distilled_prompt}\n\n"
             "Mandatory output language: Portuguese.\n"
@@ -91,6 +96,8 @@ class DatabaseAgent:
         )
 
     def combine_tool_results(self, results: list[tuple[str, str]]) -> str:
+        # Junta os blocos com títulos legíveis para não perder a origem de
+        # cada parte do resultado composto.
         sections: list[str] = []
 
         for tool_name, content in results:
@@ -104,6 +111,8 @@ class DatabaseAgent:
         task: DistilledTask,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> AgentResult:
+        # Tal como nos restantes agentes especializados, devolve sempre um
+        # AgentResult pronto para o review do supervisor.
         selected_tools = self.choose_tools(task)
 
         if not selected_tools:

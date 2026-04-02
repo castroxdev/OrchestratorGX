@@ -13,6 +13,8 @@ from app.schemas.review_result import ReviewResult
 
 
 class SupervisorAgent:
+    # Coordena contexto, routing, distilação, review e composição final da
+    # resposta, mantendo os agentes especializados focados no seu domínio.
     final_response_language_instruction = (
         "Write the final response in Portuguese.\n"
         "Translate headings and explanatory text to Portuguese when needed.\n"
@@ -21,6 +23,8 @@ class SupervisorAgent:
 
     def __init__(self, llm_client: LLMClient) -> None:
         self.llm_client = llm_client
+        # Este estado curto permite dar continuidade a follow-ups sem precisar
+        # de reconstruir todo o histórico da conversa.
         self.recent_messages: list[str] = []
         self.last_selected_agent: str | None = None
         self.last_intent: str | None = None
@@ -34,6 +38,8 @@ class SupervisorAgent:
         }
 
     def build_supervisor_context(self, user_message: str) -> SupervisorContext:
+        # Junta o pedido atual com um contexto leve das últimas interações para
+        # ajudar em pedidos ambíguos ou sequenciais.
         return SupervisorContext(
             user_message=user_message,
             recent_messages=self.recent_messages[-5:],
@@ -43,11 +49,14 @@ class SupervisorAgent:
         )
 
     def should_skip_distillation(self, user_message: str) -> bool:
+        # Pedidos muito curtos tendem a perder clareza se forem reescritos.
         normalized = user_message.strip()
         word_count = len(normalized.split())
         return word_count <= 8
 
     def choose_agent(self, context: SupervisorContext) -> str:
+        # O LLM decide o melhor agente usando o contexto recente, mas o código
+        # mantém um fallback local para respostas fora das opções válidas.
         prompt = (
             "You are a supervisor agent.\n"
             "Choose the best agent for the user's request.\n"
@@ -79,6 +88,8 @@ class SupervisorAgent:
         return selected_agent
 
     def build_distilled_task(self, context: SupervisorContext, selected_agent: str) -> DistilledTask:
+        # A distilação transforma o pedido num enunciado mais direto para o
+        # agente, preservando intenção e restrições relevantes.
         if self.should_skip_distillation(context.user_message):
             return DistilledTask(
                 original_message=context.user_message,
@@ -115,6 +126,8 @@ class SupervisorAgent:
 
         raw_output = self.llm_client.generate(prompt).strip()
 
+        # O parsing é tolerante: se algum campo vier em falta, o supervisor
+        # recorre a defaults seguros sem bloquear o fluxo.
         distilled_prompt = context.user_message.strip()
         intent = None
         constraints: list[str] = []
@@ -156,6 +169,8 @@ class SupervisorAgent:
         distilled_task: DistilledTask,
         agent_result,
     ) -> ReviewResult:
+        # Faz uma revisão leve antes da resposta final para reduzir casos em
+        # que o agente responde fora do pedido ou com cobertura insuficiente.
         prompt = (
             "You are the supervisor agent of a software assistant system.\n"
             "Your job is to review the worker result before it is returned to the user.\n"
@@ -177,6 +192,8 @@ class SupervisorAgent:
 
         raw_output = self.llm_client.generate(prompt).strip()
 
+        # Se o formato não vier perfeito, a revisão continua com valores
+        # conservadores em vez de interromper a resposta.
         approved = True
         feedback = None
 
@@ -202,6 +219,8 @@ class SupervisorAgent:
         distilled_task: DistilledTask,
         review_result: ReviewResult,
     ) -> DistilledTask:
+        # O retry mantém o mesmo domínio e injeta apenas a correção do review,
+        # evitando que a segunda tentativa mude de assunto.
         return DistilledTask(
             original_message=distilled_task.original_message,
             distilled_prompt=(
@@ -222,6 +241,8 @@ class SupervisorAgent:
         user_message: str,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> SupervisorResponse:
+        # Fluxo síncrono completo: contexto, escolha do agente, distilação,
+        # execução, review opcional e composição final para o utilizador.
         context = self.build_supervisor_context(user_message)
 
         selected_agent = self.choose_agent(context)
@@ -236,6 +257,8 @@ class SupervisorAgent:
 
         agent = self.agents.get(selected_agent, self.agents["general"])
 
+        # O review faz no máximo uma correção adicional para manter o custo e
+        # a latência controlados.
         max_retries = 1
         attempt = 0
 
@@ -290,6 +313,8 @@ class SupervisorAgent:
 
         final_response = self.llm_client.generate(final_prompt)
 
+        # O estado é atualizado só no fim para refletir a versão efetivamente
+        # aceite e devolvida ao utilizador.
         self.recent_messages.append(user_message)
         self.last_selected_agent = selected_agent
         self.last_intent = distilled_task.intent
@@ -306,6 +331,8 @@ class SupervisorAgent:
         user_message: str,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> Iterator[dict]:
+        # Replica o mesmo fluxo do handle, mas expõe metadados, progresso e
+        # chunks para a UI poder renderizar a resposta em tempo real.
         context = self.build_supervisor_context(user_message)
 
         selected_agent = self.choose_agent(context)
@@ -378,6 +405,8 @@ class SupervisorAgent:
             "used_tools": agent_result.used_tools,
         }
 
+        # Os chunks são acumulados para que o evento final traga também a
+        # resposta completa, além da transmissão incremental.
         final_response_parts: list[str] = []
 
         for chunk in self.llm_client.stream_generate(final_prompt):
@@ -387,6 +416,8 @@ class SupervisorAgent:
                 "content": chunk,
             }
 
+        # Tal como no fluxo síncrono, o estado só é consolidado depois de
+        # terminar a geração da resposta final.
         self.recent_messages.append(user_message)
         self.last_selected_agent = selected_agent
         self.last_intent = distilled_task.intent

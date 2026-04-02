@@ -9,6 +9,8 @@ from app.tools.api.suggest_request_response_models import suggest_request_respon
 
 
 class APIAgent:
+    # Especializado em desenho de contratos de API, como endpoints e modelos
+    # de request/response, com suporte a composição de tools.
     name = "api"
     response_language_instruction = (
         "Respond in Portuguese.\n"
@@ -24,6 +26,8 @@ class APIAgent:
         }
 
     def choose_tools(self, task: DistilledTask) -> list[str]:
+        # A seleção é orientada pelo LLM, mas a normalização local impede
+        # duplicados e nomes de tool fora do conjunto suportado.
         prompt = (
             "You are the API Agent of a software assistant system.\n"
             "Your task is to choose the best API options for the user's request.\n"
@@ -67,6 +71,8 @@ class APIAgent:
         return selected_tools
 
     def respond_directly(self, task: DistilledTask) -> str:
+        # Serve de fallback quando o pedido continua a ser de API, mas não
+        # justifica o uso direto das tools disponíveis.
         prompt = (
             "You are the API Agent of a software assistant system.\n"
             "Answer the user's request directly without using any tool.\n"
@@ -81,6 +87,8 @@ class APIAgent:
         return self.llm_client.generate(prompt)
 
     def build_tool_user_request(self, task: DistilledTask) -> str:
+        # Garante instruções consistentes para a saída das tools sem duplicar
+        # esta preocupação em cada implementação individual.
         return (
             f"{task.distilled_prompt}\n\n"
             "Mandatory output language: Portuguese.\n"
@@ -89,6 +97,8 @@ class APIAgent:
         )
 
     def combine_tool_results(self, results: list[tuple[str, str]]) -> str:
+        # Mantém a estrutura por blocos para facilitar a leitura e a síntese
+        # posterior feita pelo supervisor.
         sections: list[str] = []
 
         for tool_name, content in results:
@@ -102,6 +112,8 @@ class APIAgent:
         task: DistilledTask,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> AgentResult:
+        # Quando há várias tools, o agente agrega os contributos num único
+        # payload uniforme para o supervisor.
         selected_tools = self.choose_tools(task)
 
         if not selected_tools:

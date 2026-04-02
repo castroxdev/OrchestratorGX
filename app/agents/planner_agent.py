@@ -10,8 +10,8 @@ from app.tools.planner.generate_mvp_plan import generate_mvp_plan
 
 
 class PlannerAgent:
-    # PlannerAgent handles product planning requests and decides whether the
-    # answer should come from one or more planning tools or from the LLM alone.
+    # Especializado em pedidos de planeamento de produto, podendo responder
+    # diretamente ou combinar várias tools de apoio.
     name = "planner"
     response_language_instruction = (
         "Respond in Portuguese.\n"
@@ -28,6 +28,8 @@ class PlannerAgent:
         }
 
     def choose_tools(self, task: DistilledTask) -> list[str]:
+        # O LLM escolhe as tools adequadas, mas o código filtra a saída para
+        # aceitar só nomes válidos e sem repetições.
         prompt = (
             "You are the Planner Agent of a software assistant system.\n"
             "Your task is to choose the best planning options for the user's request.\n"
@@ -70,6 +72,8 @@ class PlannerAgent:
         return selected_tools
 
     def respond_directly(self, task: DistilledTask) -> str:
+        # Mantém um caminho simples quando o pedido é de planeamento, mas
+        # nenhuma tool disponível é claramente necessária.
         prompt = (
             "You are the Planner Agent of a software assistant system.\n"
             "Answer the user's request directly without using any tool.\n"
@@ -84,6 +88,8 @@ class PlannerAgent:
         return self.llm_client.generate(prompt)
 
     def build_tool_user_request(self, task: DistilledTask) -> str:
+        # Injeta instruções de idioma uma única vez antes de chamar as tools,
+        # sem alterar o conteúdo essencial do pedido destilado.
         return (
             f"{task.distilled_prompt}\n\n"
             "Mandatory output language: Portuguese.\n"
@@ -92,6 +98,8 @@ class PlannerAgent:
         )
 
     def combine_tool_results(self, results: list[tuple[str, str]]) -> str:
+        # Preserva a origem de cada bloco para o supervisor poder reformular o
+        # resultado sem perder contexto sobre cada contributo.
         sections: list[str] = []
 
         for tool_name, content in results:
@@ -105,6 +113,8 @@ class PlannerAgent:
         task: DistilledTask,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> AgentResult:
+        # O agente devolve sempre um único AgentResult, quer tenha usado tools
+        # quer tenha respondido diretamente.
         selected_tools = self.choose_tools(task)
 
         if not selected_tools:

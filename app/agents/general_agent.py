@@ -7,8 +7,8 @@ from app.schemas.messages import AgentResult
 
 
 class GeneralAgent:
-    # GeneralAgent is the fallback when the request does not clearly belong to
-    # planning, API design, or database modeling.
+    # Fallback para pedidos que não encaixam claramente nos agentes
+    # especializados disponíveis.
     name = "general"
     response_language_instruction = (
         "Respond in Portuguese.\n"
@@ -24,6 +24,8 @@ class GeneralAgent:
         task: DistilledTask,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> AgentResult:
+        # Este agente não usa tools: responde diretamente para garantir
+        # cobertura do sistema fora dos domínios especializados.
         prompt = (
             "You are the General Agent of a software assistant system.\n"
             "Handle general programming questions, broad explanations, and requests "
