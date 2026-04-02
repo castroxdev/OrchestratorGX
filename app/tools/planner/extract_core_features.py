@@ -2,6 +2,8 @@ from app.core.llm_client import LLMClient
 
 
 def extract_core_features(llm_client: LLMClient, tool_request: str) -> str:
+    # Mantém a resposta deliberadamente curta para destacar apenas o núcleo
+    # funcional que o agente ou supervisor podem reutilizar depois.
     prompt = (
         "You are a planning tool inside a software assistant system.\n"
         "Extract the core features of the user's idea.\n"

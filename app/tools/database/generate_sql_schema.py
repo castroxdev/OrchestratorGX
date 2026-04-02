@@ -2,6 +2,8 @@ from app.core.llm_client import LLMClient
 
 
 def generate_sql_schema(llm_client: LLMClient, tool_request: str) -> str:
+    # Restringe-se a exemplos básicos de schema para funcionar como passo de
+    # síntese depois da identificação de entidades e relações.
     prompt = (
         "You are a database design tool inside a software assistant system.\n"
         "Generate a simple SQL schema based on the user's idea.\n"

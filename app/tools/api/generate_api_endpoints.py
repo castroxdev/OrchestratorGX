@@ -2,6 +2,8 @@ from app.core.llm_client import LLMClient
 
 
 def generate_api_endpoints(llm_client: LLMClient, tool_request: str) -> str:
+    # Esta tool devolve só endpoints e propósito, sem detalhe adicional, para
+    # o agente decidir se precisa de complementar com modelos.
     prompt = (
         "You are an API design tool inside a software assistant system.\n"
         "Generate basic REST API endpoints based on the user's idea.\n"

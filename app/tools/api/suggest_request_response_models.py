@@ -2,6 +2,8 @@ from app.core.llm_client import LLMClient
 
 
 def suggest_request_response_models(llm_client: LLMClient, tool_request: str) -> str:
+    # Complementa a tool de endpoints com contratos de dados, mantendo a saída
+    # no formato mais direto possível para facilitar agregação posterior.
     prompt = (
         "You are an API design tool inside a software assistant system.\n"
         "Suggest simple request and response models based on the user's idea.\n"

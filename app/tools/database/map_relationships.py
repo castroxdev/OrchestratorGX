@@ -2,6 +2,8 @@ from app.core.llm_client import LLMClient
 
 
 def map_relationships(llm_client: LLMClient, tool_request: str) -> str:
+    # Assume que as entidades já estão implícitas no pedido e concentra-se só
+    # nas ligações entre elas para manter a resposta separada por responsabilidade.
     prompt = (
         "You are a database design tool inside a software assistant system.\n"
         "Map the main relationships between the entities of the user's idea.\n"

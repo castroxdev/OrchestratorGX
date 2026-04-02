@@ -2,6 +2,8 @@ from app.core.llm_client import LLMClient
 
 
 def define_user_flows(llm_client: LLMClient, tool_request: str) -> str:
+    # Foca os fluxos essenciais da primeira versão para evitar que esta tool
+    # expanda o âmbito do pedido por conta própria.
     prompt = (
         "You are a planning tool inside a software assistant system.\n"
         "Define the main user flows for the user's idea.\n"
