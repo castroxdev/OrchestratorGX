@@ -9,6 +9,7 @@ from app.core.llm_client import LLMClient
 from app.schemas.messages import SupervisorResponse
 from app.schemas.distilled_task import DistilledTask
 from app.schemas.supervisor_context import SupervisorContext
+from app.schemas.review_result import ReviewResult
 
 
 class SupervisorAgent:
@@ -41,6 +42,11 @@ class SupervisorAgent:
             last_distilled_task=self.last_distilled_task,
         )
 
+    def should_skip_distillation(self, user_message: str) -> bool:
+        normalized = user_message.strip()
+        word_count = len(normalized.split())
+        return word_count <= 8
+
     def choose_agent(self, context: SupervisorContext) -> str:
         prompt = (
             "You are a supervisor agent.\n"
@@ -52,6 +58,11 @@ class SupervisorAgent:
             "- general: for general programming questions, explanations, and requests that do not clearly fit the other agents\n\n"
             "Prefer planner for product planning requests, especially when the user asks about MVPs, first versions, core features, or user flows.\n\n"
             "Use the available conversation context when relevant.\n"
+            "The current user request has priority over previous context.\n"
+            "Use previous context only when it helps clarify an ambiguous follow-up.\n"
+            "If the current request is clear on its own, ignore unrelated previous context.\n\n"
+            "If the request is a general knowledge question, a casual factual question, or clearly outside product planning, API design, and database design, choose general.\n"
+            "Do not force specialized agents for unrelated topics.\n\n"
             f"Recent messages: {context.recent_messages if context.recent_messages else 'None'}\n"
             f"Last selected agent: {context.last_selected_agent if context.last_selected_agent else 'None'}\n"
             f"Last intent: {context.last_intent if context.last_intent else 'None'}\n"
@@ -68,6 +79,15 @@ class SupervisorAgent:
         return selected_agent
 
     def build_distilled_task(self, context: SupervisorContext, selected_agent: str) -> DistilledTask:
+        if self.should_skip_distillation(context.user_message):
+            return DistilledTask(
+                original_message=context.user_message,
+                distilled_prompt=context.user_message.strip(),
+                selected_agent=selected_agent,
+                intent=None,
+                constraints=[],
+            )
+
         prompt = (
             "You are a supervisor agent preparing a task for a specialized worker agent.\n"
             "Your job is to rewrite the user's request into a shorter, clearer, more focused task for the selected agent.\n"
@@ -75,6 +95,11 @@ class SupervisorAgent:
             "Preserve important constraints, preferences, scope, and key technical details.\n"
             "Remove conversational filler, repetition, and irrelevant background.\n\n"
             "Use the available conversation context when relevant.\n"
+            "The current user request has priority over previous context.\n"
+            "Use previous context only to resolve ambiguity in short follow-up messages.\n"
+            "If the current request is already clear, do not inject unrelated prior topics.\n"
+            "Prefer a direct worker instruction style.\n"
+            "Preserve the specific project domain from the current and previous context when relevant.\n\n"
             f"Recent messages: {context.recent_messages if context.recent_messages else 'None'}\n"
             f"Last selected agent: {context.last_selected_agent if context.last_selected_agent else 'None'}\n"
             f"Last intent: {context.last_intent if context.last_intent else 'None'}\n"
@@ -125,6 +150,73 @@ class SupervisorAgent:
             constraints=constraints,
         )
 
+    def review_agent_result(
+        self,
+        context: SupervisorContext,
+        distilled_task: DistilledTask,
+        agent_result,
+    ) -> ReviewResult:
+        prompt = (
+            "You are the supervisor agent of a software assistant system.\n"
+            "Your job is to review the worker result before it is returned to the user.\n"
+            "Check whether the result is relevant, coherent, and aligned with the user's request.\n"
+            "Approve the result if it answers the request well enough.\n"
+            "Reject it if it is clearly off-topic, incorrect for the request, too incomplete, or confusing.\n\n"
+            "The current user request has priority.\n"
+            "Use previous context only when relevant.\n\n"
+            "Return your answer in exactly this format:\n"
+            "APPROVED: yes or no\n"
+            "FEEDBACK: <short correction feedback or none>\n\n"
+            f"User request: {context.user_message}\n"
+            f"Distilled task: {distilled_task.distilled_prompt}\n"
+            f"Intent: {distilled_task.intent if distilled_task.intent else 'None'}\n"
+            f"Selected agent: {agent_result.agent_name}\n"
+            f"Used tools: {', '.join(agent_result.used_tools) if agent_result.used_tools else 'None'}\n"
+            f"Agent result: {agent_result.content}"
+        )
+
+        raw_output = self.llm_client.generate(prompt).strip()
+
+        approved = True
+        feedback = None
+
+        for line in raw_output.splitlines():
+            line = line.strip()
+
+            if line.startswith("APPROVED:"):
+                raw_approved = line.removeprefix("APPROVED:").strip().lower()
+                approved = raw_approved == "yes"
+
+            elif line.startswith("FEEDBACK:"):
+                raw_feedback = line.removeprefix("FEEDBACK:").strip()
+                if raw_feedback and raw_feedback.lower() != "none":
+                    feedback = raw_feedback
+
+        return ReviewResult(
+            approved=approved,
+            feedback=feedback,
+        )
+
+    def build_retry_task(
+        self,
+        distilled_task: DistilledTask,
+        review_result: ReviewResult,
+    ) -> DistilledTask:
+        return DistilledTask(
+            original_message=distilled_task.original_message,
+            distilled_prompt=(
+                "Retry the same request with the following correction.\n"
+                f"Original task: {distilled_task.distilled_prompt}\n"
+                f"Correction feedback: {review_result.feedback}\n"
+                "Do not change the task domain.\n"
+                "Do not introduce unrelated topics.\n"
+                "Only improve the answer for the same request."
+            ),
+            selected_agent=distilled_task.selected_agent,
+            intent=distilled_task.intent,
+            constraints=distilled_task.constraints,
+        )
+
     def handle(
         self,
         user_message: str,
@@ -143,7 +235,35 @@ class SupervisorAgent:
             progress_callback(f"Intent: {distilled_task.intent}")
 
         agent = self.agents.get(selected_agent, self.agents["general"])
+
+        max_retries = 1
+        attempt = 0
+
         agent_result = agent.handle(distilled_task, progress_callback=progress_callback)
+        review_result = self.review_agent_result(context, distilled_task, agent_result)
+
+        if progress_callback:
+            progress_callback(f"Review approved: {review_result.approved}")
+        if progress_callback and review_result.feedback:
+            progress_callback(f"Review feedback: {review_result.feedback}")
+
+        while not review_result.approved and attempt < max_retries:
+            attempt += 1
+
+            if progress_callback:
+                progress_callback(f"Retrying agent (attempt {attempt + 1})...")
+
+            corrected_task = self.build_retry_task(distilled_task, review_result)
+
+            agent_result = agent.handle(corrected_task, progress_callback=progress_callback)
+            review_result = self.review_agent_result(context, corrected_task, agent_result)
+
+            if progress_callback:
+                progress_callback(f"Review approved: {review_result.approved}")
+            if progress_callback and review_result.feedback:
+                progress_callback(f"Review feedback: {review_result.feedback}")
+
+            distilled_task = corrected_task
 
         final_prompt = (
             "You are the supervisor agent of a software assistant system.\n"
@@ -199,7 +319,35 @@ class SupervisorAgent:
             progress_callback(f"Intent: {distilled_task.intent}")
 
         agent = self.agents.get(selected_agent, self.agents["general"])
+
+        max_retries = 1
+        attempt = 0
+
         agent_result = agent.handle(distilled_task, progress_callback=progress_callback)
+        review_result = self.review_agent_result(context, distilled_task, agent_result)
+
+        if progress_callback:
+            progress_callback(f"Review approved: {review_result.approved}")
+        if progress_callback and review_result.feedback:
+            progress_callback(f"Review feedback: {review_result.feedback}")
+
+        while not review_result.approved and attempt < max_retries:
+            attempt += 1
+
+            if progress_callback:
+                progress_callback(f"Retrying agent (attempt {attempt + 1})...")
+
+            corrected_task = self.build_retry_task(distilled_task, review_result)
+
+            agent_result = agent.handle(corrected_task, progress_callback=progress_callback)
+            review_result = self.review_agent_result(context, corrected_task, agent_result)
+
+            if progress_callback:
+                progress_callback(f"Review approved: {review_result.approved}")
+            if progress_callback and review_result.feedback:
+                progress_callback(f"Review feedback: {review_result.feedback}")
+
+            distilled_task = corrected_task
 
         final_prompt = (
             "You are the supervisor agent of a software assistant system.\n"
