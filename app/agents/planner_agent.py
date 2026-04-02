@@ -2,6 +2,7 @@ from collections.abc import Callable
 from typing import Optional
 
 from app.core.llm_client import LLMClient
+from app.schemas.distilled_task import DistilledTask
 from app.schemas.messages import AgentResult
 from app.tools.planner.define_user_flows import define_user_flows
 from app.tools.planner.extract_core_features import extract_core_features
@@ -26,7 +27,7 @@ class PlannerAgent:
             "define_user_flows": define_user_flows,
         }
 
-    def choose_tools(self, user_message: str) -> list[str]:
+    def choose_tools(self, task: DistilledTask) -> list[str]:
         prompt = (
             "You are the Planner Agent of a software assistant system.\n"
             "Your task is to choose the best planning options for the user's request.\n"
@@ -50,7 +51,7 @@ class PlannerAgent:
             "extract_core_features\n"
             "define_user_flows\n"
             "none\n\n"
-            f"User request: {user_message}"
+            f"User request: {task.distilled_prompt}"
         )
 
         raw_selection = self.llm_client.generate(prompt).strip().lower()
@@ -68,7 +69,7 @@ class PlannerAgent:
 
         return selected_tools
 
-    def respond_directly(self, user_message: str) -> str:
+    def respond_directly(self, task: DistilledTask) -> str:
         prompt = (
             "You are the Planner Agent of a software assistant system.\n"
             "Answer the user's request directly without using any tool.\n"
@@ -77,14 +78,14 @@ class PlannerAgent:
             "Be clear, practical, and well organized.\n"
             "Do not mention internal tools, routing, or system behavior.\n\n"
             f"{self.response_language_instruction}\n"
-            f"User request: {user_message}"
+            f"User request: {task.distilled_prompt}"
         )
 
         return self.llm_client.generate(prompt)
 
-    def build_tool_user_request(self, user_message: str) -> str:
+    def build_tool_user_request(self, task: DistilledTask) -> str:
         return (
-            f"{user_message}\n\n"
+            f"{task.distilled_prompt}\n\n"
             "Mandatory output language: Portuguese.\n"
             "Write all natural-language text, titles, and bullet points in Portuguese.\n"
             "Keep technical identifiers unchanged when appropriate."
@@ -101,13 +102,13 @@ class PlannerAgent:
 
     def handle(
         self,
-        user_message: str,
+        task: DistilledTask,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> AgentResult:
-        selected_tools = self.choose_tools(user_message)
+        selected_tools = self.choose_tools(task)
 
         if not selected_tools:
-            response = self.respond_directly(user_message)
+            response = self.respond_directly(task)
 
             return AgentResult(
                 agent_name=self.name,
@@ -116,12 +117,11 @@ class PlannerAgent:
             )
 
         tool_results: list[tuple[str, str]] = []
-        tool_user_request = self.build_tool_user_request(user_message)
+        tool_user_request = self.build_tool_user_request(task)
+
         if progress_callback:
             progress_callback(f"Selected tools: {', '.join(selected_tools)}")
 
-        # Tool chaining here is intentionally simple: the agent picks the tools,
-        # executes them in order, and merges their outputs into one AgentResult.
         for tool_name in selected_tools:
             if progress_callback:
                 progress_callback(f"Running tool: {tool_name}")

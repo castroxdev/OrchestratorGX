@@ -1,7 +1,7 @@
 from app.core.llm_client import LLMClient
 
 
-def generate_mvp_plan(llm_client: LLMClient, user_message: str) -> str:
+def generate_mvp_plan(llm_client: LLMClient, tool_request: str) -> str:
     prompt = (
         "You are a planning tool inside a software assistant system.\n"
         "Generate a short MVP plan based on the user's idea.\n"
@@ -10,7 +10,7 @@ def generate_mvp_plan(llm_client: LLMClient, user_message: str) -> str:
         "- project goal\n"
         "- core features\n"
         "- simple first version scope\n\n"
-        f"User request: {user_message}"
+        f"User request: {tool_request}"
     )
 
     return llm_client.generate(prompt)

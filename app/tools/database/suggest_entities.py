@@ -1,7 +1,7 @@
 from app.core.llm_client import LLMClient
 
 
-def suggest_entities(llm_client: LLMClient, user_message: str) -> str:
+def suggest_entities(llm_client: LLMClient, tool_request: str) -> str:
     prompt = (
         "You are a database design tool inside a software assistant system.\n"
         "Suggest the main entities for the user's idea.\n"
@@ -9,7 +9,7 @@ def suggest_entities(llm_client: LLMClient, user_message: str) -> str:
         "Return only 3 to 6 bullet points.\n"
         "Each bullet point must contain one entity name.\n"
         "Do not add an introduction or conclusion.\n\n"
-        f"User request: {user_message}"
+        f"User request: {tool_request}"
     )
 
     return llm_client.generate(prompt)
