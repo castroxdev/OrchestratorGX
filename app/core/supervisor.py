@@ -9,6 +9,7 @@ from app.core.llm_client import LLMClient
 from app.schemas.messages import SupervisorResponse
 from app.schemas.distilled_task import DistilledTask
 from app.schemas.supervisor_context import SupervisorContext
+from app.schemas.review_result import ReviewResult
 
 
 class SupervisorAgent:
@@ -125,6 +126,53 @@ class SupervisorAgent:
             constraints=constraints,
         )
 
+    def review_agent_result(
+        self,
+        context: SupervisorContext,
+        distilled_task: DistilledTask,
+        agent_result,
+    ) -> ReviewResult:
+        prompt = (
+            "You are the supervisor agent of a software assistant system.\n"
+            "Your job is to review the worker result before it is returned to the user.\n"
+            "Check whether the result is relevant, coherent, and aligned with the user's request.\n"
+            "Approve the result if it answers the request well enough.\n"
+            "Reject it if it is clearly off-topic, incorrect for the request, too incomplete, or confusing.\n\n"
+            "The current user request has priority.\n"
+            "Use previous context only when relevant.\n\n"
+            "Return your answer in exactly this format:\n"
+            "APPROVED: yes or no\n"
+            "FEEDBACK: <short correction feedback or none>\n\n"
+            f"User request: {context.user_message}\n"
+            f"Distilled task: {distilled_task.distilled_prompt}\n"
+            f"Intent: {distilled_task.intent if distilled_task.intent else 'None'}\n"
+            f"Selected agent: {agent_result.agent_name}\n"
+            f"Used tools: {', '.join(agent_result.used_tools) if agent_result.used_tools else 'None'}\n"
+            f"Agent result: {agent_result.content}"
+        )
+
+        raw_output = self.llm_client.generate(prompt).strip()
+
+        approved = True
+        feedback = None
+
+        for line in raw_output.splitlines():
+            line = line.strip()
+
+            if line.startswith("APPROVED:"):
+                raw_approved = line.removeprefix("APPROVED:").strip().lower()
+                approved = raw_approved == "yes"
+
+            elif line.startswith("FEEDBACK:"):
+                raw_feedback = line.removeprefix("FEEDBACK:").strip()
+                if raw_feedback and raw_feedback.lower() != "none":
+                    feedback = raw_feedback
+
+        return ReviewResult(
+            approved=approved,
+            feedback=feedback,
+        )
+
     def handle(
         self,
         user_message: str,
@@ -144,6 +192,13 @@ class SupervisorAgent:
 
         agent = self.agents.get(selected_agent, self.agents["general"])
         agent_result = agent.handle(distilled_task, progress_callback=progress_callback)
+
+        review_result = self.review_agent_result(context, distilled_task, agent_result)
+
+        if progress_callback:
+            progress_callback(f"Review approved: {review_result.approved}")
+        if progress_callback and review_result.feedback:
+            progress_callback(f"Review feedback: {review_result.feedback}")
 
         final_prompt = (
             "You are the supervisor agent of a software assistant system.\n"
@@ -200,6 +255,13 @@ class SupervisorAgent:
 
         agent = self.agents.get(selected_agent, self.agents["general"])
         agent_result = agent.handle(distilled_task, progress_callback=progress_callback)
+
+        review_result = self.review_agent_result(context, distilled_task, agent_result)
+
+        if progress_callback:
+            progress_callback(f"Review approved: {review_result.approved}")
+        if progress_callback and review_result.feedback:
+            progress_callback(f"Review feedback: {review_result.feedback}")
 
         final_prompt = (
             "You are the supervisor agent of a software assistant system.\n"
