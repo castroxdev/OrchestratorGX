@@ -20,6 +20,10 @@ class SupervisorAgent:
 
     def __init__(self, llm_client: LLMClient) -> None:
         self.llm_client = llm_client
+        self.recent_messages: list[str] = []
+        self.last_selected_agent: str | None = None
+        self.last_intent: str | None = None
+        self.last_distilled_task: str | None = None
 
         self.agents = {
             "planner": PlannerAgent(llm_client),
@@ -31,10 +35,10 @@ class SupervisorAgent:
     def build_supervisor_context(self, user_message: str) -> SupervisorContext:
         return SupervisorContext(
             user_message=user_message,
-            recent_messages=[],
-            last_selected_agent=None,
-            last_intent=None,
-            last_distilled_task=None,
+            recent_messages=self.recent_messages[-5:],
+            last_selected_agent=self.last_selected_agent,
+            last_intent=self.last_intent,
+            last_distilled_task=self.last_distilled_task,
         )
 
     def choose_agent(self, context: SupervisorContext) -> str:
@@ -166,6 +170,11 @@ class SupervisorAgent:
 
         final_response = self.llm_client.generate(final_prompt)
 
+        self.recent_messages.append(user_message)
+        self.last_selected_agent = selected_agent
+        self.last_intent = distilled_task.intent
+        self.last_distilled_task = distilled_task.distilled_prompt
+
         return SupervisorResponse(
             selected_agent=agent_result.agent_name,
             final_response=final_response,
@@ -229,6 +238,11 @@ class SupervisorAgent:
                 "type": "chunk",
                 "content": chunk,
             }
+
+        self.recent_messages.append(user_message)
+        self.last_selected_agent = selected_agent
+        self.last_intent = distilled_task.intent
+        self.last_distilled_task = distilled_task.distilled_prompt
 
         yield {
             "type": "done",
