@@ -2,6 +2,7 @@ from collections.abc import Callable
 from typing import Optional
 
 from app.core.llm_client import LLMClient
+from app.schemas.distilled_task import DistilledTask
 from app.schemas.messages import AgentResult
 
 
@@ -20,7 +21,7 @@ class GeneralAgent:
 
     def handle(
         self,
-        user_message: str,
+        task: DistilledTask,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> AgentResult:
         prompt = (
@@ -29,7 +30,7 @@ class GeneralAgent:
             "that do not clearly belong to planning, API design, or database modeling.\n"
             "Reply clearly and directly.\n\n"
             f"{self.response_language_instruction}\n"
-            f"User request: {user_message}"
+            f"User request: {task.distilled_prompt}"
         )
 
         response = self.llm_client.generate(prompt)

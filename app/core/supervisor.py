@@ -7,12 +7,10 @@ from app.agents.general_agent import GeneralAgent
 from app.agents.planner_agent import PlannerAgent
 from app.core.llm_client import LLMClient
 from app.schemas.messages import SupervisorResponse
+from app.schemas.distilled_task import DistilledTask
 
 
 class SupervisorAgent:
-    # The supervisor is the orchestration layer: it decides which specialized
-    # agent should handle the request and then turns that agent output into the
-    # final user-facing response.
     final_response_language_instruction = (
         "Write the final response in Portuguese.\n"
         "Translate headings and explanatory text to Portuguese when needed.\n"
@@ -50,20 +48,76 @@ class SupervisorAgent:
 
         return selected_agent
 
+    def build_distilled_task(self, user_message: str, selected_agent: str) -> DistilledTask:
+        prompt = (
+            "You are a supervisor agent preparing a task for a specialized worker agent.\n"
+            "Your job is to rewrite the user's request into a shorter, clearer, more focused task for the selected agent.\n"
+            "Keep only information that is useful for solving the request.\n"
+            "Preserve important constraints, preferences, scope, and key technical details.\n"
+            "Remove conversational filler, repetition, and irrelevant background.\n\n"
+            "Also infer a short intent label when possible.\n\n"
+            "Return your answer in exactly this format:\n"
+            "DISTILLED_PROMPT: <short focused task>\n"
+            "INTENT: <short intent label or none>\n"
+            "CONSTRAINTS: <comma-separated constraints or none>\n\n"
+            f"Selected agent: {selected_agent}\n"
+            f"User request: {user_message}"
+        )
+
+        raw_output = self.llm_client.generate(prompt).strip()
+
+        distilled_prompt = user_message.strip()
+        intent = None
+        constraints: list[str] = []
+
+        for line in raw_output.splitlines():
+            line = line.strip()
+
+            if line.startswith("DISTILLED_PROMPT:"):
+                distilled_prompt = line.removeprefix("DISTILLED_PROMPT:").strip()
+
+            elif line.startswith("INTENT:"):
+                raw_intent = line.removeprefix("INTENT:").strip()
+                if raw_intent and raw_intent.lower() != "none":
+                    intent = raw_intent
+
+            elif line.startswith("CONSTRAINTS:"):
+                raw_constraints = line.removeprefix("CONSTRAINTS:").strip()
+                if raw_constraints and raw_constraints.lower() != "none":
+                    constraints = [
+                        item.strip()
+                        for item in raw_constraints.split(",")
+                        if item.strip()
+                    ]
+
+        if not distilled_prompt:
+            distilled_prompt = user_message.strip()
+
+        return DistilledTask(
+            original_message=user_message,
+            distilled_prompt=distilled_prompt,
+            selected_agent=selected_agent,
+            intent=intent,
+            constraints=constraints,
+        )
+
     def handle(
         self,
         user_message: str,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> SupervisorResponse:
-        # The supervisor never calls tools directly. It delegates the request to
-        # one agent, receives an AgentResult back, and packages the final answer
-        # as a SupervisorResponse for the outer layer.
         selected_agent = self.choose_agent(user_message)
         if progress_callback:
             progress_callback(f"Selected agent: {selected_agent}")
 
+        distilled_task = self.build_distilled_task(user_message, selected_agent)
+        if progress_callback:
+            progress_callback(f"Distilled task: {distilled_task.distilled_prompt}")
+        if progress_callback and distilled_task.intent:
+            progress_callback(f"Intent: {distilled_task.intent}")
+
         agent = self.agents.get(selected_agent, self.agents["general"])
-        agent_result = agent.handle(user_message, progress_callback=progress_callback)
+        agent_result = agent.handle(distilled_task, progress_callback=progress_callback)
 
         final_prompt = (
             "You are the supervisor agent of a software assistant system.\n"
@@ -76,6 +130,9 @@ class SupervisorAgent:
             "Preserve the original structure whenever possible.\n\n"
             f"{self.final_response_language_instruction}\n"
             f"User request: {user_message}\n"
+            f"Distilled task: {distilled_task.distilled_prompt}\n"
+            f"Intent: {distilled_task.intent if distilled_task.intent else 'None'}\n"
+            f"Constraints: {', '.join(distilled_task.constraints) if distilled_task.constraints else 'None'}\n"
             f"Selected agent: {agent_result.agent_name}\n"
             f"Used tools: {', '.join(agent_result.used_tools) if agent_result.used_tools else 'None'}\n"
             f"Agent result: {agent_result.content}\n\n"
@@ -98,14 +155,18 @@ class SupervisorAgent:
         user_message: str,
         progress_callback: Optional[Callable[[str], None]] = None,
     ) -> Iterator[dict]:
-        # Streaming keeps the same orchestration flow. The only difference is
-        # that the final supervisor answer is yielded in chunks for the web UI.
         selected_agent = self.choose_agent(user_message)
         if progress_callback:
             progress_callback(f"Selected agent: {selected_agent}")
 
+        distilled_task = self.build_distilled_task(user_message, selected_agent)
+        if progress_callback:
+            progress_callback(f"Distilled task: {distilled_task.distilled_prompt}")
+        if progress_callback and distilled_task.intent:
+            progress_callback(f"Intent: {distilled_task.intent}")
+
         agent = self.agents.get(selected_agent, self.agents["general"])
-        agent_result = agent.handle(user_message, progress_callback=progress_callback)
+        agent_result = agent.handle(distilled_task, progress_callback=progress_callback)
 
         final_prompt = (
             "You are the supervisor agent of a software assistant system.\n"
@@ -118,6 +179,9 @@ class SupervisorAgent:
             "Preserve the original structure whenever possible.\n\n"
             f"{self.final_response_language_instruction}\n"
             f"User request: {user_message}\n"
+            f"Distilled task: {distilled_task.distilled_prompt}\n"
+            f"Intent: {distilled_task.intent if distilled_task.intent else 'None'}\n"
+            f"Constraints: {', '.join(distilled_task.constraints) if distilled_task.constraints else 'None'}\n"
             f"Selected agent: {agent_result.agent_name}\n"
             f"Used tools: {', '.join(agent_result.used_tools) if agent_result.used_tools else 'None'}\n"
             f"Agent result: {agent_result.content}\n\n"

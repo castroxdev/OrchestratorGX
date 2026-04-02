@@ -1,7 +1,7 @@
 from app.core.llm_client import LLMClient
 
 
-def suggest_request_response_models(llm_client: LLMClient, user_message: str) -> str:
+def suggest_request_response_models(llm_client: LLMClient, tool_request: str) -> str:
     prompt = (
         "You are an API design tool inside a software assistant system.\n"
         "Suggest simple request and response models based on the user's idea.\n"
@@ -12,7 +12,7 @@ def suggest_request_response_models(llm_client: LLMClient, user_message: str) ->
         "- request fields\n"
         "- response fields\n"
         "Do not add an introduction or conclusion.\n\n"
-        f"User request: {user_message}"
+        f"User request: {tool_request}"
     )
 
     return llm_client.generate(prompt)
