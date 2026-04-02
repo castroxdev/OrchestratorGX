@@ -11,6 +11,11 @@ class APIAgent:
     # APIAgent focuses on backend contract design such as endpoints and
     # request/response models, optionally combining multiple API tools.
     name = "api"
+    response_language_instruction = (
+        "Respond in Portuguese.\n"
+        "Write all natural-language explanations, headings, and bullet points in Portuguese.\n"
+        "Keep endpoint names, field names, code, and other technical identifiers unchanged when appropriate.\n"
+    )
 
     def __init__(self, llm_client: LLMClient) -> None:
         self.llm_client = llm_client
@@ -70,10 +75,19 @@ class APIAgent:
             "DTO structure, REST design, backend contracts, and integration decisions.\n"
             "Be clear, practical, and well organized.\n"
             "Do not mention internal tools, routing, or system behavior.\n\n"
+            f"{self.response_language_instruction}\n"
             f"User request: {user_message}"
         )
 
         return self.llm_client.generate(prompt)
+
+    def build_tool_user_request(self, user_message: str) -> str:
+        return (
+            f"{user_message}\n\n"
+            "Mandatory output language: Portuguese.\n"
+            "Write all natural-language text, titles, and bullet points in Portuguese.\n"
+            "Keep endpoint names, field names, code, and other technical identifiers unchanged when appropriate."
+        )
 
     def combine_tool_results(self, results: list[tuple[str, str]]) -> str:
         sections: list[str] = []
@@ -101,6 +115,7 @@ class APIAgent:
             )
 
         tool_results: list[tuple[str, str]] = []
+        tool_user_request = self.build_tool_user_request(user_message)
         if progress_callback:
             progress_callback(f"Selected tools: {', '.join(selected_tools)}")
 
@@ -111,7 +126,7 @@ class APIAgent:
                 progress_callback(f"Running tool: {tool_name}")
 
             tool_function = self.tools[tool_name]
-            tool_output = tool_function(self.llm_client, user_message)
+            tool_output = tool_function(self.llm_client, tool_user_request)
             tool_results.append((tool_name, tool_output))
 
         combined_result = self.combine_tool_results(tool_results)

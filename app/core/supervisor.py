@@ -13,6 +13,12 @@ class SupervisorAgent:
     # The supervisor is the orchestration layer: it decides which specialized
     # agent should handle the request and then turns that agent output into the
     # final user-facing response.
+    final_response_language_instruction = (
+        "Write the final response in Portuguese.\n"
+        "Translate headings and explanatory text to Portuguese when needed.\n"
+        "Keep code, SQL, endpoint names, field names, and other technical identifiers unchanged when appropriate.\n"
+    )
+
     def __init__(self, llm_client: LLMClient) -> None:
         self.llm_client = llm_client
 
@@ -68,6 +74,7 @@ class SupervisorAgent:
             "Do not introduce major new ideas.\n"
             "Keep the final answer aligned with the agent result.\n"
             "Preserve the original structure whenever possible.\n\n"
+            f"{self.final_response_language_instruction}\n"
             f"User request: {user_message}\n"
             f"Selected agent: {agent_result.agent_name}\n"
             f"Used tools: {', '.join(agent_result.used_tools) if agent_result.used_tools else 'None'}\n"
@@ -109,6 +116,7 @@ class SupervisorAgent:
             "Do not introduce major new ideas.\n"
             "Keep the final answer aligned with the agent result.\n"
             "Preserve the original structure whenever possible.\n\n"
+            f"{self.final_response_language_instruction}\n"
             f"User request: {user_message}\n"
             f"Selected agent: {agent_result.agent_name}\n"
             f"Used tools: {', '.join(agent_result.used_tools) if agent_result.used_tools else 'None'}\n"

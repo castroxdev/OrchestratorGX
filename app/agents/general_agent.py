@@ -9,6 +9,11 @@ class GeneralAgent:
     # GeneralAgent is the fallback when the request does not clearly belong to
     # planning, API design, or database modeling.
     name = "general"
+    response_language_instruction = (
+        "Respond in Portuguese.\n"
+        "Write all natural-language explanations in Portuguese.\n"
+        "Keep code, commands, and technical identifiers unchanged when appropriate.\n"
+    )
 
     def __init__(self, llm_client: LLMClient) -> None:
         self.llm_client = llm_client
@@ -23,6 +28,7 @@ class GeneralAgent:
             "Handle general programming questions, broad explanations, and requests "
             "that do not clearly belong to planning, API design, or database modeling.\n"
             "Reply clearly and directly.\n\n"
+            f"{self.response_language_instruction}\n"
             f"User request: {user_message}"
         )
 
