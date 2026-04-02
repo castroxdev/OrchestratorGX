@@ -7,6 +7,7 @@ from app.agents.general_agent import GeneralAgent
 from app.agents.planner_agent import PlannerAgent
 from app.core.llm_client import LLMClient
 from app.schemas.messages import SupervisorResponse
+from app.schemas.distilled_task import DistilledTask
 
 
 class SupervisorAgent:
@@ -44,6 +45,15 @@ class SupervisorAgent:
         )
 
         selected_agent = self.llm_client.generate(prompt).lower().strip()
+
+        def build_distilled_task(self, user_message: str, selected_agent: str) -> DistilledTask:
+            return DistilledTask(
+                original_message=user_message,
+                distilled_prompt=user_message.strip(),
+                selected_agent=selected_agent,
+                intent=None,
+                constraints=[],
+            )
 
         if selected_agent not in self.agents:
             return "general"
